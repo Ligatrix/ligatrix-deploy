@@ -1,0 +1,6 @@
+# Allow-list: the build context holds only what the image needs.
+# Everything else (.git, .env files, tests, docs, backups, certificates) stays out.
+*
+!app/package.json
+!app/src/
+!app/src/**

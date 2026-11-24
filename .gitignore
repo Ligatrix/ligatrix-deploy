@@ -1,0 +1,17 @@
+node_modules/
+coverage/
+*.log
+.DS_Store
+
+# Real configuration and key material never enter git.
+.env
+compose/.env
+compose/certs/*
+!compose/certs/.gitignore
+compose/acme/*
+!compose/acme/.gitignore
+
+# Database backups hold every row.
+backups/
+*.dump
+*.dump.sha256

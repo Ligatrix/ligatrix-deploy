@@ -1,0 +1,32 @@
+{
+  "name": "@ligatrix/deploy",
+  "version": "1.0.0",
+  "description": "Production deployment templates for a Node web application with PostgreSQL behind nginx, with a static checker that keeps them hardened.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node app/src/main.js",
+    "test": "node --test",
+    "check": "node scripts/check.mjs",
+    "lint": "node scripts/lint.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ligatrix/ligatrix-deploy.git"
+  },
+  "homepage": "https://github.com/Ligatrix/ligatrix-deploy#readme",
+  "bugs": {
+    "url": "https://github.com/Ligatrix/ligatrix-deploy/issues"
+  },
+  "keywords": [
+    "docker",
+    "compose",
+    "nginx",
+    "postgres",
+    "deployment",
+    "hardening"
+  ]
+}

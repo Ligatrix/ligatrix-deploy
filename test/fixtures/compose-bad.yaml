@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:latest
+    environment:
+      POSTGRES_PASSWORD: hunter2
+  app:
+    image: example/app
+    environment:
+      - DATABASE_URL=postgres://app:hunter2@db:5432/app
+    depends_on:
+      - db
+    privileged: true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - cache:/cache

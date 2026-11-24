@@ -1,0 +1,156 @@
+# Single-host production stack: nginx (TLS, headers, rate limits) -> app -> Postgres.
+#
+#   cp compose/.env.example compose/.env     # then set POSTGRES_PASSWORD
+#   ./scripts/dev-certs.sh                   # or install real certificates
+#   docker compose -f compose/compose.yaml up -d --build
+#
+# Paths are relative to this directory. Secrets come from compose/.env, which is
+# never committed; `${VAR:?...}` makes Compose refuse to start when one is missing.
+
+name: reference-app
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in compose/.env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend
+    # No published port: only services on the internal backend network reach it.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    shm_size: 256mb
+    stop_grace_period: 60s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: ${APP_IMAGE:-reference-app:1.0.0}
+    restart: unless-stopped
+    init: true
+    environment:
+      PORT: "3000"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in compose/.env}@db:5432/${POSTGRES_DB:-app}
+      READY_CHECK: postgres
+      SHUTDOWN_TIMEOUT_MS: "20000"
+      DRAIN_DELAY_MS: "2000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Longer than SHUTDOWN_TIMEOUT_MS, so the app finishes draining before Docker kills it.
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "src/healthcheck.js"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  nginx:
+    # Runs as an unprivileged user on 8080/8443; Docker publishes them on 80/443.
+    image: nginxinc/nginx-unprivileged:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-80}:8080"
+      - "${HTTPS_PORT:-443}:8443"
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/conf.d:/etc/nginx/conf.d:ro
+      - ../nginx/snippets:/etc/nginx/snippets:ro
+      - ./certs:/etc/nginx/certs:ro
+      - ./acme:/var/www/acme:ro
+    networks:
+      - frontend
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/nginx-health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+  # On-demand job, not a long-running service:
+  #   docker compose -f compose/compose.yaml --profile ops run --rm backup
+  backup:
+    image: postgres:16
+    profiles:
+      - ops
+    entrypoint: ["/scripts/backup.sh"]
+    environment:
+      PGHOST: db
+      PGDATABASE: ${POSTGRES_DB:-app}
+      PGUSER: ${POSTGRES_USER:-app}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in compose/.env}
+      BACKUP_DIR: /backups
+      RETENTION_DAYS: "14"
+    volumes:
+      - ../scripts:/scripts:ro
+      - ../backups:/backups
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  frontend: {}
+  backend:
+    # No route to the outside world: the database is reachable only from the app.
+    internal: true
+
+volumes:
+  pgdata: {}
